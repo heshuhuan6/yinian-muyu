@@ -1,0 +1,17 @@
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { URL } from 'node:url';
+import { log } from 'node:console';
+const root = new URL('../', import.meta.url);
+let html = await readFile(new URL('dist/index.html', root), 'utf8');
+const scriptPath = html.match(/<script[^>]*src="([^"]+)"[^>]*><\/script>/)?.[1];
+const stylePath = html.match(/<link[^>]*href="([^"]+\.css)"[^>]*>/)?.[1];
+if (!scriptPath || !stylePath) throw new Error('Build output must contain one script and one stylesheet');
+const script = await readFile(new URL('dist/' + scriptPath.replace(/^\.\//, ''), root), 'utf8');
+const style = await readFile(new URL('dist/' + stylePath.replace(/^\.\//, ''), root), 'utf8');
+html = html.replace(/<script[^>]*src="[^"]+"[^>]*><\/script>/, () => '<script type="module">' + script.replace(/<\/script/gi, '<\\/script') + '</script>');
+html = html.replace(/<link[^>]*href="[^"]+\.css"[^>]*>/, () => '<style>' + style + '</style>');
+await mkdir(new URL('out/', root), { recursive: true });
+const notices = await readFile(new URL('THIRD_PARTY_NOTICES.md', root), 'utf8');
+html = html.replace('<head>', '<head>\n<!--\n' + notices.replace(/--/g, '—') + '\n-->');
+await writeFile(new URL('out/一念木鱼.html', root), html);
+log('Saved out/一念木鱼.html — all code and styles embedded.');
