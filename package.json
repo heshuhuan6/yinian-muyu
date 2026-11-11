@@ -9,7 +9,10 @@
     "lint": "eslint . --max-warnings 0",
     "preview": "vite preview --host 127.0.0.1",
     "standalone": "npm run build && node scripts/standalone.mjs",
-    "mac": "bash native/build.sh"
+    "mac": "bash native/build.sh",
+    "windows": "npm run build && npm --prefix windows run package",
+    "windows:test": "npm --prefix windows test",
+    "windows:verify": "npm --prefix windows run verify"
   },
   "dependencies": {
     "react": "^19.2.0",

@@ -11,10 +11,10 @@
 | 版本 | 使用方式 |
 | --- | --- |
 | macOS 13+ | 下载 Mac ZIP，解压后双击 `一念木鱼.app`；可移入「应用程序」。包含 Apple Silicon 与 Intel。 |
-| Windows | 下载 Windows 便携包，解压后打开其中的应用。具体兼容系统见对应 Release。 |
+| Windows 10/11 x64 | 下载 Windows ZIP，完整解压后双击其中的 `YinianMuyu.exe`。 |
 | 离线网页 | 下载 `一念木鱼.html`，双击用浏览器打开。 |
 
-Mac 版本使用临时签名，尚无 Developer ID 公证。其他电脑首次打开可能需要在「系统设置 → 隐私与安全性」允许打开。应用不申请管理员权限，不会安装后台服务。[Apple 的首次打开说明](https://support.apple.com/102445)。
+Mac 版本使用临时签名，尚无 Developer ID 公证。其他电脑首次打开可能需要在「系统设置 → 隐私与安全性」允许打开。Windows 包未进行代码签名，首次运行可能出现 SmartScreen 发布者提示。应用不申请管理员权限，不会安装后台服务。[Apple 的首次打开说明](https://support.apple.com/102445)。
 
 ## 让时间自己走
 
@@ -52,7 +52,7 @@ npm run lint
 npm run standalone
 ```
 
-`npm run standalone` 生成 `out/一念木鱼.html`。Mac 需安装 Xcode Command Line Tools，再运行 `npm run mac`，得到 `out/Muyu.app`。
+`npm run standalone` 生成 `out/一念木鱼.html`。Mac 需安装 Xcode Command Line Tools，再运行 `npm run mac`，得到 `out/Muyu.app`。Windows 构建机另运行 `npm --prefix windows ci`、`npm run windows`；详见 [Windows 构建与验收](windows/README.md)。
 
 | 路径 | 内容 |
 | --- | --- |
@@ -70,13 +70,17 @@ npm run standalone
 
 ## 验收
 
-构建与 ESLint 通过。浏览器检查覆盖四个启停边界、跨午夜、三档节奏、连续拖动、键盘、声音、持久化、减少动态效果、资源释放和断网运行。Mac 原生检查覆盖透明窗口、角落定位、置顶、休眠/隐藏恢复和设置展开。
+构建与 ESLint 通过。浏览器检查覆盖四个启停边界、跨午夜、三档节奏、连续拖动、键盘、声音、持久化、减少动态效果、资源释放和断网运行。Mac 原生检查覆盖透明窗口、角落定位、置顶、休眠/隐藏恢复和设置展开。Windows 11 实机通过 17 项功能验收、5 项最终 EXE 检查及原生拖动/菜单操作；运行进程网络审计为零 TCP、零 UDP、零外部 URL。
 
 详细测试与平台状态见 [中文说明](out/说明.md) 及每个 Release。Mac 实机验收使用 Apple Silicon。
 
+## 产品演示
+
+[观看 / 下载 30 秒宣传片](https://github.com/heshuhuan6/yinian-muyu/releases/download/v1.0.0/Yinian-Muyu-30s-Promo.mp4)。实际应用画面搭配玻璃特写、时段演示、昼夜滑动与木鱼原声。
+
 ## License
 
-[MIT](LICENSE)。React / React DOM 的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+[MIT](LICENSE)。React / React DOM / Scheduler / Vite 的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ---
 
