@@ -17,8 +17,27 @@ test('period boundary validation accepts midnight and empty list, rejects malfor
 });
 test('IPC only accepts known bounded payloads', () => {
   assert.equal(validMessage({ type: 'menu', data: null }), true);
-  assert.equal(validMessage({ type: 'layout', data: { extra: 250 } }), true);
+  assert.equal(validMessage({ type: 'layout', data: { extra: 250, settingsOpen: true } }), true);
   for (const message of [{ type: 'exec', data: 'anything' }, { type: 'layout', data: { extra: -1 } }, { type: 'layout', data: { extra: Infinity } }, { type: 'layout', data: { extra: 1201 } }, { type: 'settings', data: { periods: [], bpm: 100 } }, { type: 'menu', data: { command: 'launch' } }, { type: 'error', data: 'x'.repeat(4097) }]) assert.equal(validMessage(message), false);
+});
+test('v1 preferences migrate and arbitrary v1.1 geometry survives serialization', () => {
+  assert.equal(cleanSettings({ width: 640, anchor: 'right' }).width, 640);
+  const value = cleanSettings({ width: 377.3, anchor: 'custom', position: { x: -720.3, y: 214.8 }, display: 10 });
+  assert.equal(value.width, 377); assert.equal(value.anchor, 'custom');
+  assert.deepEqual(value.position, { x: -720, y: 215 });
+  assert.deepEqual(cleanSettings(JSON.parse(JSON.stringify(value))), value);
+  assert.equal(cleanSettings({ anchor: 'custom', position: { x: Infinity, y: 0 } }).anchor, 'left');
+});
+test('desktop messages enforce finite bounded offsets and a zero-offset begin', () => {
+  for (const mode of ['move', 'resize']) {
+    for (const action of ['begin', 'update', 'end', 'cancel']) assert.equal(validMessage({ type: 'desktopGesture', data: { action, mode, dx: 0, dy: 0 } }), true);
+  }
+  for (const width of [240, 377.5, 800]) assert.equal(validMessage({ type: 'desktopSize', data: { width } }), true);
+  assert.equal(validMessage({ type: 'desktopScale', data: { delta: -32 } }), true);
+  for (const data of [{ action: 'begin', mode: 'move', dx: 1, dy: 0 }, { action: 'update', mode: 'exec', dx: 0, dy: 0 }, { action: 'update', mode: 'move', dx: Infinity, dy: 0 }, { action: 'end', mode: 'resize', dx: 0, dy: 100001 }]) assert.equal(validMessage({ type: 'desktopGesture', data }), false);
+  for (const width of [0, 239, 801, NaN, '480']) assert.equal(validMessage({ type: 'desktopSize', data: { width } }), false);
+  assert.equal(validMessage({ type: 'desktopScale', data: { delta: Infinity } }), false);
+  assert.equal(validMessage({ type: 'layout', data: { extra: 0 } }), false);
 });
 test('asset URL policy rejects remote, local file, foreign hosts and encoded path escapes', () => {
   assert.equal(localAsset('muyu://app/index.html'), 'index.html');

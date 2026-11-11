@@ -23,8 +23,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var isPinned: Bool
     var mouseMonitors: [Any] = []
     var settingsExtra: CGFloat = 0
+    var settingsOpen = false
+    var customPosition: NSPoint?
+    var dragScreenID: Int?
+    var desktopGesture: (mode: String, origin: NSPoint, width: CGFloat)?
     var diagnostic: DiagnosticRunner?
-    var widgetSize: NSSize { NSSize(width: widgetWidth, height: min(preferredScreen().visibleFrame.height - 32, widgetWidth * 84 / 160 + 160 + settingsExtra)) }
+    var widgetSize: NSSize {
+        let area = preferredScreen().visibleFrame
+        return NSSize(width: min(area.width, settingsOpen ? max(480, widgetWidth) : widgetWidth), height: min(area.height - 16, widgetWidth * 84 / 160 + settingsExtra))
+    }
 
     override init() {
         let args = ProcessInfo.processInfo.arguments
@@ -32,8 +39,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             testPath = args[index + 1]
             preferences = UserDefaults(suiteName: Self.identifier + ".tests." + String(ProcessInfo.processInfo.processIdentifier))!
         } else { testPath = nil; preferences = .standard }
-        anchor = preferences.string(forKey: "anchor") == "right" ? "right" : "left"
-        widgetWidth = preferences.integer(forKey: "width") == 640 ? 640 : 480
+        let savedAnchor = preferences.string(forKey: "anchor") ?? "left"
+        anchor = ["left", "right", "free"].contains(savedAnchor) ? savedAnchor : "left"
+        let width = preferences.object(forKey: "width") as? Double ?? 480
+        widgetWidth = width.isFinite ? CGFloat(max(240, min(800, width))) : 480
+        if let x = preferences.object(forKey: "positionX") as? Double, let top = preferences.object(forKey: "positionTop") as? Double, x.isFinite, top.isFinite { customPosition = NSPoint(x: x, y: top) }
         isPinned = preferences.object(forKey: "pinned") as? Bool ?? true
         super.init()
     }
@@ -69,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(self, name: "muyu")
         let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        var initial: [String: Any] = ["reduced": reduced, "bpm": preferences.integer(forKey: "bpm")]
+        var initial: [String: Any] = ["reduced": reduced, "bpm": preferences.integer(forKey: "bpm"), "width": widgetWidth]
         if let saved = preferences.array(forKey: "periods") { initial["periods"] = saved }
         let encoded = String(data: try! JSONSerialization.data(withJSONObject: initial), encoding: .utf8)!
         config.userContentController.addUserScript(WKUserScript(source: "window.__MUYU_NATIVE__ = " + encoded + ";", injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -84,24 +94,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
 
     func preferredScreen() -> NSScreen {
-        let saved = preferences.integer(forKey: "screen")
+        let saved = dragScreenID ?? preferences.integer(forKey: "screen")
         return NSScreen.screens.first(where: { screenID($0) == saved }) ?? NSScreen.main ?? NSScreen.screens[0]
     }
     func screenID(_ screen: NSScreen) -> Int { (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue ?? 0 }
     func placePanel() {
         guard panel != nil, !NSScreen.screens.isEmpty else { return }
         let area = preferredScreen().visibleFrame
-        let x = anchor == "left" ? area.minX + 16 : area.maxX - widgetSize.width - 16
-        panel.setFrame(NSRect(x: max(area.minX, x), y: max(area.minY, area.maxY - widgetSize.height - 16), width: widgetSize.width, height: widgetSize.height), display: true)
+        let size = widgetSize
+        let position = anchor == "free" ? customPosition ?? NSPoint(x: area.minX + 16, y: area.maxY - 16)
+            : NSPoint(x: anchor == "right" ? area.maxX - widgetWidth - 16 : area.minX + 16, y: area.maxY - 16)
+        let x = position.x - (size.width - widgetWidth) / 2
+        panel.setFrame(NSRect(x: min(max(area.minX, x), area.maxX - size.width), y: min(max(area.minY, position.y - size.height), area.maxY - size.height), width: size.width, height: size.height), display: true)
         updateHitTesting()
+    }
+    func savePlacement() {
+        preferences.set(anchor, forKey: "anchor"); preferences.set(Double(widgetWidth), forKey: "width")
+        if let p = customPosition { preferences.set(Double(p.x), forKey: "positionX"); preferences.set(Double(p.y), forKey: "positionTop") }
+        if let id = dragScreenID { preferences.set(id, forKey: "screen") }
+    }
+    func setWidgetWidth(_ width: CGFloat, persist: Bool = true) {
+        guard width.isFinite else { return }
+        let area = preferredScreen().visibleFrame
+        widgetWidth = min(max(240, width), min(800, area.width - 16, (area.height - 16) * 160 / 84))
+        placePanel()
+        if ready { evaluate("window.muyu.setDesktopSize(\(widgetWidth));") }
+        if persist { savePlacement() }
+    }
+    func handleDesktopGesture(_ data: [String: Any]) {
+        guard let action = data["action"] as? String, let mode = data["mode"] as? String, ["move", "resize"].contains(mode), let dx = data["dx"] as? Double, let dy = data["dy"] as? Double, dx.isFinite, dy.isFinite, abs(dx) <= 20000, abs(dy) <= 20000 else { return }
+        if action == "begin" {
+            desktopGesture = (mode, NSPoint(x: panel.frame.minX + (panel.frame.width - widgetWidth) / 2, y: panel.frame.maxY), widgetWidth)
+            return
+        }
+        guard let gesture = desktopGesture, gesture.mode == mode else { return }
+        if action == "update" || action == "end" {
+            anchor = "free"
+            if mode == "move" {
+                let candidate = NSPoint(x: gesture.origin.x + dx, y: gesture.origin.y - dy)
+                let center = NSPoint(x: candidate.x + widgetWidth / 2, y: candidate.y - widgetWidth * 42 / 160)
+                let screen = NSScreen.screens.min { a, b in
+                    func distance(_ s: NSScreen) -> CGFloat { let f = s.visibleFrame; return hypot(max(f.minX - center.x, 0, center.x - f.maxX), max(f.minY - center.y, 0, center.y - f.maxY)) }
+                    return distance(a) < distance(b)
+                } ?? preferredScreen()
+                dragScreenID = screenID(screen)
+                let area = screen.visibleFrame
+                customPosition = NSPoint(x: min(max(candidate.x, area.minX), area.maxX - widgetWidth), y: min(max(candidate.y, area.minY + widgetWidth * 84 / 160), area.maxY))
+                placePanel()
+            } else {
+                customPosition = gesture.origin
+                let ratio = 84.0 / 160.0
+                setWidgetWidth(gesture.width + CGFloat((dx + dy * ratio) / (1 + ratio * ratio)), persist: false)
+            }
+        }
+        if action == "end" || action == "cancel" { desktopGesture = nil; savePlacement(); updateHitTesting() }
     }
     func updateHitTesting() {
         guard panel != nil, NSEvent.pressedMouseButtons & 1 == 0 else { return }
         let p = NSEvent.mouseLocation, r = panel.frame
-        let x = (p.x - r.minX) / r.width * 160, y = (r.maxY - p.y) / r.width * 160
+        let x = (p.x - r.minX - (r.width - widgetWidth) / 2) / widgetWidth * 160, y = (r.maxY - p.y) / widgetWidth * 160
         let track = hypot(max(abs(x - 80) - 40, 0), y - 42) <= 33
-        let lens = x >= 23 && x <= 137 && y >= 6 && y <= 78
-        let toolbar = p.x >= r.minX + 12 && p.x <= r.maxX - 12 && y >= 84 && p.y >= r.minY + 8
+        let lensX = 45 + (latestState["position"] as? Double ?? 0.5) * 70
+        let lens = hypot(x - lensX, max(abs(y - 42) - 15, 0)) <= 22
+        let toolbar = settingsOpen && p.x >= r.minX + 12 && p.x <= r.maxX - 12 && y >= 84 && p.y >= r.minY + 8
         panel.ignoresMouseEvents = hidden || !(track || lens || toolbar)
     }
     func evaluate(_ script: String, completion: ((Any?, Error?) -> Void)? = nil) {
@@ -137,8 +192,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             }
         case "layout":
             if let data = body["data"] as? [String: Any], let extra = data["extra"] as? Double {
-                settingsExtra = CGFloat(max(0, min(500, extra))); placePanel()
+                settingsOpen = data["settingsOpen"] as? Bool ?? false
+                settingsExtra = settingsOpen ? CGFloat(max(0, min(1200, extra))) : 0; placePanel()
             }
+        case "desktopGesture": if let data = body["data"] as? [String: Any] { handleDesktopGesture(data) }
+        case "desktopSize": if let data = body["data"] as? [String: Any], let width = data["width"] as? Double, width.isFinite { setWidgetWidth(CGFloat(width)) }
+        case "desktopScale": if let data = body["data"] as? [String: Any], let delta = data["delta"] as? Double, delta.isFinite, abs(delta) <= 60 { setWidgetWidth(widgetWidth + CGFloat(delta)) }
         case "error": errors.append(String(describing: body["data"] ?? "JavaScript error"))
         case "menu": makeMenu().popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
         default: break
@@ -185,9 +244,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         for rate in [40, 60, 90] { tempo.addItem(item("每分钟 \(rate) 次", #selector(setTempo(_:)), state: latestState["bpm"] as? Int == rate, tag: rate)) }
         let tempoItem = NSMenuItem(title: "节奏", action: nil, keyEquivalent: ""); tempoItem.submenu = tempo; menu.addItem(tempoItem)
         menu.addItem(item("本次次数清零", #selector(resetCount))); menu.addItem(.separator())
+        menu.addItem(item("拖动庭院移动 · 滚轮缩放", nil))
         menu.addItem(item("固定在左上角", #selector(moveLeft), state: anchor == "left")); menu.addItem(item("固定在右上角", #selector(moveRight), state: anchor == "right"))
         let sizes = NSMenu(title: "显示大小")
-        for width in [480, 640] { sizes.addItem(item("\(width) px", #selector(resizeWidget(_:)), state: Int(widgetWidth) == width, tag: width)) }
+        for width in [240, 320, 480, 640, 800] { sizes.addItem(item("\(width) px", #selector(resizeWidget(_:)), state: Int(widgetWidth) == width, tag: width)) }
+        sizes.addItem(.separator()); sizes.addItem(item("自定义大小…", #selector(editSize)))
         let sizeItem = NSMenuItem(title: "显示大小", action: nil, keyEquivalent: ""); sizeItem.submenu = sizes; menu.addItem(sizeItem)
         if NSScreen.screens.count > 1 {
             let screens = NSMenu(title: "显示屏")
@@ -199,13 +260,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     }
     @objc func resumeClock() { if ready { evaluate("window.muyu.resumeClock();") } }
     @objc func editSchedule() { if ready { showPanel(); evaluate("window.muyu.showSettings(true);") } }
+    @objc func editSize() { if ready { showPanel(); evaluate("window.muyu.showSettings(true); document.querySelector('.widget-size-number').focus();") } }
     @objc func toggleSound() { if ready { evaluate("void window.muyu.setSound(\(!(latestState["sound"] as? Bool ?? false)));") } }
     @objc func setTempo(_ sender: NSMenuItem) { if [40, 60, 90].contains(sender.tag), ready { evaluate("window.muyu.setTempo(\(sender.tag));") } }
     @objc func resetCount() { if ready { evaluate("window.muyu.resetCount();") } }
-    @objc func moveLeft() { anchor = "left"; preferences.set(anchor, forKey: "anchor"); placePanel() }
-    @objc func moveRight() { anchor = "right"; preferences.set(anchor, forKey: "anchor"); placePanel() }
-    @objc func resizeWidget(_ sender: NSMenuItem) { guard [480, 640].contains(sender.tag) else { return }; widgetWidth = CGFloat(sender.tag); preferences.set(sender.tag, forKey: "width"); placePanel() }
-    @objc func selectScreen(_ sender: NSMenuItem) { preferences.set(sender.tag, forKey: "screen"); placePanel() }
+    @objc func moveLeft() { anchor = "left"; savePlacement(); placePanel() }
+    @objc func moveRight() { anchor = "right"; savePlacement(); placePanel() }
+    @objc func resizeWidget(_ sender: NSMenuItem) { setWidgetWidth(CGFloat(sender.tag)) }
+    @objc func selectScreen(_ sender: NSMenuItem) { dragScreenID = sender.tag; preferences.set(sender.tag, forKey: "screen"); if anchor == "free" { anchor = "left" }; savePlacement(); placePanel() }
     @objc func togglePinned() { isPinned.toggle(); preferences.set(isPinned, forKey: "pinned"); panel.level = isPinned ? .floating : .normal }
     @objc func toggleVisible() { if hidden { showPanel() } else { hidden = true; panel.orderOut(nil); if ready { evaluate("window.muyu.setPaused(true);") } } }
     func showPanel() { hidden = false; placePanel(); panel.orderFrontRegardless(); if ready { evaluate("window.muyu.setPaused(\(sleeping));") } }

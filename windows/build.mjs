@@ -15,7 +15,7 @@ await makeIcon();
 if (path.dirname(stage) !== dir || path.basename(stage) !== '.stage') throw new Error('Unexpected staging directory');
 await fs.rm(stage, { recursive: true, force: true });
 await fs.mkdir(stage, { recursive: true });
-for (const file of ['main.cjs', 'preload.cjs', 'validation.cjs']) await fs.copyFile(path.join(dir, file), path.join(stage, file));
+for (const file of ['main.cjs', 'preload.cjs', 'validation.cjs', 'geometry.cjs']) await fs.copyFile(path.join(dir, file), path.join(stage, file));
 await fs.cp(path.join(dir, 'assets'), path.join(stage, 'assets'), { recursive: true });
 await fs.cp(path.join(root, 'dist'), path.join(stage, 'frontend'), { recursive: true });
 await fs.writeFile(path.join(stage, 'package.json'), JSON.stringify({ name: 'yinian-muyu', productName: '一念木鱼', version: pkg.version, main: 'main.cjs', description: pkg.description, author: 'Yinian Muyu contributors' }, null, 2));

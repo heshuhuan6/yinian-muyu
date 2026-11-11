@@ -12,6 +12,7 @@ final class DiagnosticRunner {
     func start() {
         record("Native WebGL2, real clock and muted launch", app.latestState["backend"] as? String == "webgl2" && app.latestState["mode"] as? String == "clock" && app.latestState["sound"] as? Bool == false, app.latestState)
         record("Readable transparent desktop panel", app.panel.frame.width == 480 && !app.panel.isOpaque && app.panel.level == .floating && app.panel.styleMask.contains(.nonactivatingPanel))
+        record("Capsule-only panel has no toolbar space", abs(app.panel.frame.height - 480 * 84 / 160) < 1 && app.settingsExtra == 0 && !app.settingsOpen)
         app.moveLeft(); let left = app.panel.frame, area = app.preferredScreen().visibleFrame
         record("Left corner", abs(left.minX - area.minX - 16) < 1 && abs(left.maxY - area.maxY + 16) < 1)
         app.moveRight(); let right = app.panel.frame
@@ -105,7 +106,49 @@ final class DiagnosticRunner {
                         self.app.resumeClock()
                         self.state { value in
                             self.record("Return to current local time", value["mode"] as? String == "clock", value)
-                            self.finish()
+                            self.testCustomPlacement()
+                        }
+                    }
+                }
+            }
+        }
+    }
+    func testCustomPlacement() {
+        app.evaluate("window.muyu.showSettings(false); window.muyu.resumeClock();") { _, _ in
+            self.after(0.15) {
+                self.app.setWidgetWidth(517)
+                self.after(0.15) {
+                    let frame = self.app.panel.frame
+                    self.record("Arbitrary width 517 px keeps capsule aspect", abs(frame.width - 517) < 1 && abs(frame.height - 517 * 84 / 160) < 1)
+                    self.app.moveLeft()
+                    let origin = self.app.panel.frame
+                    self.app.evaluate("window.webkit.messageHandlers.muyu.postMessage({type:'desktopGesture',data:{action:'begin',mode:'move',dx:0,dy:0}}); window.webkit.messageHandlers.muyu.postMessage({type:'desktopGesture',data:{action:'end',mode:'move',dx:137,dy:91}}); null;") { _, _ in
+                        self.after(0.15) {
+                            let moved = self.app.panel.frame
+                            self.record("Move bridge repositions native window freely", abs(moved.minX - origin.minX - 137) < 1 && abs(moved.maxY - origin.maxY + 91) < 1 && self.app.anchor == "free", ["x": moved.minX, "top": moved.maxY])
+                            let expected = self.app.customPosition
+                            self.app.showPanel()
+                            self.record("Showing preserves a free position", self.app.customPosition == expected && self.app.panel.frame == moved)
+                            self.app.evaluate("window.webkit.messageHandlers.muyu.postMessage({type:'desktopGesture',data:{action:'begin',mode:'resize',dx:0,dy:0}}); window.webkit.messageHandlers.muyu.postMessage({type:'desktopGesture',data:{action:'end',mode:'resize',dx:63,dy:33.075}}); null;") { _, _ in
+                                self.after(0.15) {
+                                    self.record("Resize bridge changes actual native size", abs(self.app.widgetWidth - 580) < 1 && abs(self.app.panel.frame.width - 580) < 1)
+                                    let restored = AppDelegate()
+                                    self.record("Width and arbitrary position survive preference reload", restored.anchor == "free" && abs(restored.widgetWidth - 580) < 1 && restored.customPosition == self.app.customPosition)
+                                    let stable = self.app.customPosition
+                                    self.app.editSchedule()
+                                    self.after(0.15) {
+                                        self.app.evaluate("window.muyu.showSettings(false);") { _, _ in
+                                            self.after(0.15) {
+                                                self.record("Closing settings restores pure capsule and position", !self.app.settingsOpen && self.app.settingsExtra == 0 && self.app.customPosition == stable && abs(self.app.panel.frame.height - 580 * 84 / 160) < 1)
+                                                self.app.setWidgetWidth(900); self.record("Maximum size is bounded", self.app.widgetWidth <= 800)
+                                                self.app.setWidgetWidth(100); self.record("Minimum size is bounded", self.app.widgetWidth == 240)
+                                                self.app.setWidgetWidth(480); self.app.moveLeft(); self.app.resumeClock()
+                                                self.finish()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

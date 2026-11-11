@@ -81,6 +81,8 @@ canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; 
 .footer-key { display: flex; gap: 5px; align-items: center; }
 kbd { border: 1px solid #9a927a5c; border-radius: 4px; display: inline-block; padding: 1px 4px; font: inherit; margin-right: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.settings-panel { display: contents; }
+.settings-heading, .desktop-size, .desktop-help, .resize-handle { display: none; }
 .desktop { min-height: 0; height: 100svh; background: transparent; overflow: auto; }
 html:has(.desktop), body:has(.desktop) { background: transparent; }
 .desktop .masthead, .desktop .intro, .desktop .footer, .desktop .control-labels, .desktop .world-caption { display: none; }
@@ -115,3 +117,29 @@ html:has(.desktop), body:has(.desktop) { background: transparent; }
  .desktop .schedule { max-width: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; } .status-dot { transform: none; } }
+
+/* The desktop surface contains only the capsule until settings are requested. */
+.desktop { overflow: hidden; }
+.desktop.settings-open { overflow: auto; }
+.desktop .experience { flex: none; min-height: 0; }
+.desktop .control-group { width: min(100%, var(--widget-width, 480px)); margin: 0; }
+.desktop .world-switch { touch-action: none; }
+.desktop .settings-panel { display: none; }
+.desktop.settings-open .settings-panel { display: flex; flex-direction: column; align-items: center; width: calc(100% - 24px); margin: 8px 12px 12px; padding: 15px 16px 12px; gap: 10px; border: 1px solid #fff9e7ba; border-radius: 18px; background: #f1ebdff7; color: #514e40; --ink: #514e40; --muted: #726b5c; box-shadow: 0 3px 12px #231f1b1c; }
+.desktop .settings-heading { display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 13px; letter-spacing: 1px; }
+.close-settings { border: 1px solid #8b80623b; background: #fffaf0; padding: 5px 11px; border-radius: 8px; font-size: 11px; }
+.desktop .timebar { margin: 0; background: transparent; padding: 4px; }
+.desktop .console { margin: 0; padding: 6px 8px; box-shadow: none; background: transparent; border: 0; }
+.desktop .world-caption { margin: 0; background: transparent; padding: 0; }
+.desktop .schedule { width: 100%; margin: 0; background: #fffaf03d; }
+.desktop .schedule summary { padding: 11px 9px; }
+.desktop .schedule-body { padding: 0 9px 10px; }
+.desktop .desktop-size { display: grid; grid-template-columns: auto minmax(70px, 1fr) 64px auto; width: 100%; align-items: center; gap: 10px; font-size: 11px; margin-top: 2px; }
+.widget-size { width: 100%; accent-color: #8a795a; }
+.widget-size-number { width: 64px; color: inherit; background: #fffaf0; border: 1px solid #9a927a5c; border-radius: 6px; padding: 5px; font: 12px "SFMono-Regular", Consolas, monospace; }
+.desktop .desktop-help { display: block; margin: 0; color: var(--muted); font-size: 9px; line-height: 1.8; text-align: center; }
+.desktop .resize-handle { display: block; position: absolute; right: 8%; bottom: 24%; width: 18px; height: 18px; padding: 0; border: 0; background: #f9f1d9ba; border-radius: 5px; opacity: 0; cursor: nwse-resize; touch-action: none; }
+.resize-handle::after { content: ""; position: absolute; inset: 5px; border-right: 1px solid #5e624c; border-bottom: 1px solid #5e624c; }
+.desktop .world-switch:hover .resize-handle, .desktop .world-switch[data-desktop-gesture=resize] .resize-handle { opacity: .8; }
+.desktop .world-switch[data-desktop-gesture=move] { cursor: grabbing; }
+.desktop .world-switch[data-desktop-gesture=resize] { cursor: nwse-resize; }

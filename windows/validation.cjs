@@ -10,11 +10,14 @@ function validPeriods(value) {
 }
 function cleanSettings(value) {
   const v = plain(value) ? value : {};
+  const position = plain(v.position) && [v.position.x, v.position.y].every(n => Number.isFinite(n) && Math.abs(n) <= 100000)
+    ? { x: Math.round(v.position.x), y: Math.round(v.position.y) } : null;
   return {
     periods: (validPeriods(v.periods) ? v.periods : DEFAULT_PERIODS).map(({ id, start, end }) => ({ id, start, end })),
     bpm: [40, 60, 90].includes(v.bpm) ? v.bpm : 60,
-    anchor: v.anchor === 'right' ? 'right' : 'left',
-    width: v.width === 640 ? 640 : 480,
+    anchor: v.anchor === 'custom' && position ? 'custom' : v.anchor === 'right' ? 'right' : 'left',
+    position,
+    width: Number.isFinite(v.width) && v.width >= 240 && v.width <= 800 ? Math.round(v.width) : 480,
     pinned: typeof v.pinned === 'boolean' ? v.pinned : true,
     display: Number.isSafeInteger(v.display) ? v.display : null,
   };
@@ -24,7 +27,12 @@ function validMessage(message) {
   const d = message.data;
   switch (message.type) {
     case 'settings': return plain(d) && validPeriods(d.periods) && [40, 60, 90].includes(d.bpm);
-    case 'layout': return plain(d) && Number.isFinite(d.extra) && d.extra >= 0 && d.extra <= 1200;
+    case 'layout': return plain(d) && Number.isFinite(d.extra) && d.extra >= 0 && d.extra <= 1200 && typeof d.settingsOpen === 'boolean';
+    case 'desktopGesture': return plain(d) && ['begin', 'update', 'end', 'cancel'].includes(d.action) &&
+      ['move', 'resize'].includes(d.mode) && [d.dx, d.dy].every(n => Number.isFinite(n) && Math.abs(n) <= 100000) &&
+      (d.action !== 'begin' || (d.dx === 0 && d.dy === 0));
+    case 'desktopSize': return plain(d) && Number.isFinite(d.width) && d.width >= 240 && d.width <= 800;
+    case 'desktopScale': return plain(d) && Number.isFinite(d.delta) && Math.abs(d.delta) <= 1000;
     case 'menu': return d === null;
     case 'error': return typeof d === 'string' && d.length <= 4096;
     case 'ready':

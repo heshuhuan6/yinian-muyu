@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('__MUYU_NATIVE__', {
 contextBridge.exposeInMainWorld('webkit', {
   messageHandlers: { muyu: { postMessage(message) {
     if (!message || typeof message !== 'object') return;
-    if (['settings', 'layout', 'menu', 'ready', 'status', 'error'].includes(message.type)) {
+    if (['settings', 'layout', 'menu', 'ready', 'status', 'error', 'desktopGesture', 'desktopSize', 'desktopScale'].includes(message.type)) {
       ipcRenderer.send('muyu:message', message);
     }
   } } },

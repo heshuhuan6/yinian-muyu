@@ -11,6 +11,7 @@ export interface Snapshot {
   position: number; target: number; velocity: number; stretch: number;
   paused: boolean; reduced: boolean; demo: boolean; sound: boolean;
   backend: string; pixelScale: number; width: number; height: number; checksum: string;
+  desktopWidth: number; settingsOpen: boolean;
   audio: ReturnType<WoodSound['inspect']>;
 }
 interface MuyuAPI {
@@ -19,6 +20,7 @@ interface MuyuAPI {
   resumeClock(): Snapshot;
   setPeriods(periods: Period[]): Snapshot;
   showSettings(open: boolean): void;
+  setDesktopSize(width: number): void;
   setTempo(value: number): Snapshot;
   setSound(value: boolean): Promise<Snapshot>;
   setPaused(value: boolean): Snapshot;
@@ -27,7 +29,7 @@ interface MuyuAPI {
 }
 declare global {
   interface Window {
-    __MUYU_NATIVE__?: { reduced: boolean; periods?: Period[]; bpm?: number };
+    __MUYU_NATIVE__?: { reduced: boolean; periods?: Period[]; bpm?: number; width?: number };
     webkit?: { messageHandlers?: { muyu?: { postMessage(message: unknown): void } } };
     muyu?: MuyuAPI;
     __render?: (seconds: number) => Snapshot;
@@ -45,6 +47,11 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
   const soundButton = find<HTMLButtonElement>('.sound-button'), soundLabel = find('.sound-label'), soundHint = find('.sound-hint');
   const details = find<HTMLDetailsElement>('.schedule'), rows = find('.schedule-rows'), scheduleHint = find('.schedule-hint');
   const summary = find('.schedule-summary'), addButton = find<HTMLButtonElement>('.add-period');
+  const settingsPanel = find('.settings-panel'), sizeInput = find<HTMLInputElement>('.widget-size'), sizeNumber = find<HTMLInputElement>('.widget-size-number');
+  const desktop = room.classList.contains('desktop');
+  let desktopWidth = clamp(window.__MUYU_NATIVE__?.width ?? 480, 240, 800), settingsOpen = false, lastLayout = '';
+  room.style.setProperty('--widget-width', desktopWidth + 'px');
+  sizeInput.value = sizeNumber.value = String(Math.round(desktopWidth));
   const abort = new AbortController(), signal = abort.signal;
   const reducedMedia = matchMedia('(prefers-reduced-motion: reduce)');
   const reduced = window.__MUYU_NATIVE__?.reduced ?? reducedMedia.matches;
@@ -67,6 +74,7 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
   let frame = 0, last: number | null = null, pixelScale = 1, lastPost = -1000;
   let lastStatus = '', lastCount = -1, nextID = 10;
   let gesture: { id: number; x: number; y: number; moved: boolean; offset: number } | null = null;
+  let desktopGesture: { id: number; x: number; y: number; mode: 'move' | 'resize'; started: boolean } | null = null;
   const post = (type: string, data: unknown): void => window.webkit?.messageHandlers?.muyu?.postMessage({ type, data });
   const isPaused = (): boolean => suspended || (!window.__MUYU_NATIVE__ && document.hidden);
   const mode = (): Snapshot['mode'] => model.demo ? 'demo' : previewMinutes === null ? 'clock' : 'preview';
@@ -76,7 +84,7 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
     position: model.position, target: model.target, velocity: model.velocity, stretch: model.stretch,
     paused: isPaused(), reduced: model.reduced, demo: model.demo, sound: soundWanted,
     backend: renderer.kind, pixelScale, width: canvas.width, height: canvas.height,
-    checksum: world.checksum(), audio: sound.inspect(),
+    checksum: world.checksum(), audio: sound.inspect(), desktopWidth, settingsOpen,
   });
   const clock = (): void => {
     reading = model.demo ? model.scriptClock() : previewMinutes ?? systemMinutes();
@@ -93,7 +101,10 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
     post('settings', settings);
   };
   const layout = (): void => {
-    post('layout', { extra: details.open ? find('.schedule-body').scrollHeight + 16 : 0 });
+    const extra = desktop ? (settingsOpen ? Math.ceil(settingsPanel.getBoundingClientRect().height + 20) : 0)
+      : details.open ? find('.schedule-body').scrollHeight + 16 : 0;
+    const key = extra + ':' + settingsOpen;
+    if (lastLayout !== key) { lastLayout = key; post('layout', { extra, settingsOpen }); }
   };
   const renderRows = (): void => {
     rows.replaceChildren();
@@ -148,14 +159,16 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
     if (performance.now() - lastPost >= 1000) { post('status', inspect()); lastPost = performance.now(); }
   };
   const resize = (): void => {
-    const dpr = devicePixelRatio || 1, desktop = room.classList.contains('desktop');
+    const dpr = devicePixelRatio || 1;
     const available = desktop ? Math.min(800, stage.clientWidth)
       : Math.min(800, stage.clientWidth, Math.max(168, innerHeight - (details.open ? 560 : 470)) * 160 / 84);
     const scale = Math.min(available * dpr / 160, 422 * dpr / 84);
-    pixelScale = scale >= 1 ? Math.floor(scale + 1e-8) : scale;
+    // Custom desktop sizes fill the chosen width; world textures still use NEAREST.
+    // The full-page experience retains whole-device-pixel scaling.
+    pixelScale = desktop ? scale : scale >= 1 ? Math.floor(scale + 1e-8) : scale;
     canvas.width = Math.round(160 * pixelScale); canvas.height = Math.round(84 * pixelScale);
     slider.style.width = canvas.width / dpr + 'px'; slider.style.height = canvas.height / dpr + 'px';
-    paint();
+    paint(); layout();
   };
   const tick = (now: number): void => {
     if (disposed || seeking || isPaused()) return;
@@ -179,6 +192,12 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
     handover(); previewMinutes = clamp(minutes, 0, 1440); clock(); paint(); return inspect();
   };
   const cancelGesture = (): void => {
+    if (desktopGesture) {
+      if (desktopGesture.started) post('desktopGesture', { action: 'cancel', mode: desktopGesture.mode, dx: 0, dy: 0 });
+      const id = desktopGesture.id; desktopGesture = null;
+      delete slider.dataset.desktopGesture;
+      if (slider.hasPointerCapture(id)) slider.releasePointerCapture(id);
+    }
     if (gesture) { const id = gesture.id; gesture = null; if (slider.hasPointerCapture(id)) slider.releasePointerCapture(id); }
     model.dragging = false; delete slider.dataset.dragging;
   };
@@ -190,7 +209,20 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
   const api: MuyuAPI = {
     inspect, setTime, setPeriods: applyPeriods,
     resumeClock() { handover(); cancelGesture(); previewMinutes = null; clock(); paint(); return inspect(); },
-    showSettings(open) { details.open = open; layout(); },
+    showSettings(open) {
+      settingsOpen = desktop && open; room.classList.toggle('settings-open', settingsOpen);
+      if (!open) room.scrollTop = 0;
+      details.open = open;
+      resize();
+      if (open && desktop) find<HTMLButtonElement>('.close-settings').focus({ preventScroll: true });
+      else if (desktop) slider.focus({ preventScroll: true });
+    },
+    setDesktopSize(width) {
+      if (!Number.isFinite(width)) return;
+      desktopWidth = clamp(width, 240, 800);
+      room.style.setProperty('--widget-width', desktopWidth + 'px');
+      sizeInput.value = sizeNumber.value = String(Math.round(desktopWidth)); resize();
+    },
     setTempo(value) {
       if (![40, 60, 90].includes(value)) return inspect();
       handover(); model.bpm = value; model.phase = 0;
@@ -224,10 +256,28 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
     if (!event.isPrimary || event.button !== 0) return;
     const bounds = slider.getBoundingClientRect(), unit = bounds.width / 160;
     const delta = event.clientX - bounds.left - (45 + model.position * 70) * unit;
+    const y = (event.clientY - bounds.top) / unit;
+    const overLens = Math.hypot(delta / unit, Math.max(Math.abs(y - 42) - 15, 0)) <= 22;
+    const handle = (event.target as HTMLElement).closest('.resize-handle');
+    if (desktop && window.__MUYU_NATIVE__ && (handle || event.altKey || !overLens)) {
+      event.preventDefault();
+      desktopGesture = { id: event.pointerId, x: event.screenX, y: event.screenY, mode: handle ? 'resize' : 'move', started: false };
+      slider.setPointerCapture(event.pointerId); slider.focus({ preventScroll: true }); return;
+    }
     gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, offset: Math.abs(delta) <= 21 * unit ? delta : 0 };
     slider.setPointerCapture(event.pointerId); slider.focus({ preventScroll: true });
   }, { signal });
   window.addEventListener('pointermove', event => {
+    if (desktopGesture && desktopGesture.id === event.pointerId) {
+      const dx = event.screenX - desktopGesture.x, dy = event.screenY - desktopGesture.y;
+      if (!desktopGesture.started && Math.hypot(dx, dy) > 4) {
+        desktopGesture.started = true;
+        slider.dataset.desktopGesture = desktopGesture.mode;
+        post('desktopGesture', { action: 'begin', mode: desktopGesture.mode, dx: 0, dy: 0 });
+      }
+      if (desktopGesture.started) post('desktopGesture', { action: 'update', mode: desktopGesture.mode, dx, dy });
+      return;
+    }
     const bounds = slider.getBoundingClientRect();
     model.pointerX = clamp((event.clientX - bounds.left) / bounds.width * 2 - 1, -1, 1);
     model.pointerY = clamp((event.clientY - bounds.top) / bounds.height * 2 - 1, -1, 1);
@@ -241,6 +291,12 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
     }
   }, { signal });
   window.addEventListener('pointerup', event => {
+    if (desktopGesture && desktopGesture.id === event.pointerId) {
+      const current = desktopGesture; desktopGesture = null; delete slider.dataset.desktopGesture;
+      if (current.started) post('desktopGesture', { action: 'end', mode: current.mode, dx: event.screenX - current.x, dy: event.screenY - current.y });
+      if (slider.hasPointerCapture(event.pointerId)) slider.releasePointerCapture(event.pointerId);
+      return;
+    }
     if (!gesture || gesture.id !== event.pointerId) return;
     if (!gesture.moved) previewMinutes = minuteAt(event.clientX);
     gesture = null; model.dragging = false; delete slider.dataset.dragging;
@@ -260,6 +316,24 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
     else setTime(reading + (['ArrowRight', 'ArrowUp'].includes(event.key) ? 1 : -1) * (event.shiftKey ? 60 : 15));
   }, { signal });
   returnButton.addEventListener('click', () => api.resumeClock(), { signal });
+  find<HTMLButtonElement>('.close-settings').addEventListener('click', () => api.showSettings(false), { signal });
+  window.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { cancelGesture(); if (settingsOpen) api.showSettings(false); }
+  }, { signal });
+  const requestSize = (value: number): void => {
+    if (!Number.isFinite(value)) return;
+    const width = Math.round(clamp(value, 240, 800));
+    api.setDesktopSize(width); post('desktopSize', { width });
+  };
+  sizeInput.addEventListener('input', () => requestSize(Number(sizeInput.value)), { signal });
+  sizeNumber.addEventListener('change', () => requestSize(Number(sizeNumber.value)), { signal });
+  slider.addEventListener('wheel', event => {
+    if (!desktop) return;
+    event.preventDefault();
+    const delta = clamp(-event.deltaY * (event.deltaMode === 1 ? 12 : .6), -60, 60);
+    if (window.__MUYU_NATIVE__) post('desktopScale', { delta });
+    else requestSize(desktopWidth + delta);
+  }, { signal, passive: false });
   room.querySelectorAll<HTMLButtonElement>('.tempo-button').forEach(b => {
     b.setAttribute('aria-pressed', String(Number(b.dataset.bpm) === model.bpm));
     b.addEventListener('click', () => api.setTempo(Number(b.dataset.bpm)), { signal });
@@ -291,7 +365,9 @@ export function mountEngine(room: HTMLElement): { dispose(): void } {
   reducedMedia.addEventListener('change', () => api.setReduced(reducedMedia.matches), { signal });
   window.addEventListener('resize', resize, { signal });
   document.addEventListener('visibilitychange', restartLoop, { signal });
-  document.addEventListener('contextmenu', event => { if (window.__MUYU_NATIVE__) { event.preventDefault(); post('menu', null); } }, { signal });
+  document.addEventListener('contextmenu', event => {
+    if (desktop) { event.preventDefault(); if (window.__MUYU_NATIVE__) post('menu', null); else api.showSettings(!settingsOpen); }
+  }, { signal });
   window.addEventListener('error', e => post('error', e.message), { signal });
   window.addEventListener('unhandledrejection', e => post('error', String(e.reason)), { signal });
   canvas.addEventListener('webglcontextlost', event => {
