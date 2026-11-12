@@ -76,9 +76,11 @@ npm run standalone
 
 详细测试与平台状态见 [中文说明](out/说明.md) 及每个 Release。Mac 实机验收使用 Apple Silicon。
 
-## 产品演示（v1.0）
+## 产品演示（v1.1）
 
-[观看 / 下载 30 秒宣传片](https://github.com/heshuhuan6/yinian-muyu/releases/download/v1.0.0/Yinian-Muyu-30s-Promo.mp4)。实际应用画面搭配玻璃特写、时段演示、昼夜滑动与木鱼原声。
+[观看 / 下载 30 秒新版宣传片](https://github.com/heshuhuan6/yinian-muyu/releases/download/v1.1.0/Yinian-Muyu-v1.1-30s-Promo.mp4)。展示纯胶囊、自由拖动、连续缩放和精确尺寸设置，再跟随光影进入昼夜与定时敲击。1080p / 30 fps，实际应用引擎画面与木鱼原声，搭配可编辑指针和文字动效。
+
+[宣传片制作说明](docs/promo-v1.1.md) · [可编辑工程](https://github.com/heshuhuan6/yinian-muyu/releases/download/v1.1.0/Yinian-Muyu-v1.1-ChatCut-Project.zip) · [封面](https://github.com/heshuhuan6/yinian-muyu/releases/download/v1.1.0/Yinian-Muyu-v1.1-Promo-Poster.png)
 
 ## License
 
