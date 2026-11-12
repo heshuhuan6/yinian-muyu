@@ -15,7 +15,7 @@ function cleanSettings(value) {
   return {
     periods: (validPeriods(v.periods) ? v.periods : DEFAULT_PERIODS).map(({ id, start, end }) => ({ id, start, end })),
     bpm: [40, 60, 90].includes(v.bpm) ? v.bpm : 60,
-    anchor: v.anchor === 'custom' && position ? 'custom' : v.anchor === 'right' ? 'right' : 'left',
+    anchor: v.anchor === 'custom' && position ? 'custom' : ['left', 'right', 'bottom-left', 'bottom-right'].includes(v.anchor) ? v.anchor : 'right',
     position,
     width: Number.isFinite(v.width) && v.width >= 240 && v.width <= 800 ? Math.round(v.width) : 480,
     pinned: typeof v.pinned === 'boolean' ? v.pinned : true,

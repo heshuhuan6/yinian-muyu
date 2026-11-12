@@ -7,8 +7,30 @@ const screens = [
   { id: 2, workArea: { x: -1920, y: -120, width: 1920, height: 1080 } },
 ];
 test('default is capsule only; corner commands preserve the intended aspect', () => {
-  assert.deepEqual(capsulePose(cleanSettings(null), screens).rect, { x: 16, y: 16, width: 480, height: 252 });
+  assert.deepEqual(capsulePose(cleanSettings(null), screens).rect, { x: 1040, y: 16, width: 480, height: 252 });
   assert.deepEqual(capsulePose(cleanSettings({ width: 377, anchor: 'right' }), screens).rect, { x: 1143, y: 16, width: 377, height: 198 });
+});
+
+test('bottom corners track workArea taskbars and keep their gap after scaling', () => {
+  const display = { id: 3, workArea: { x: 64, y: 40, width: 1472, height: 776 } };
+  for (const width of [240, 533, 800]) {
+    const height = Math.ceil(width * RATIO);
+    const right = capsulePose(cleanSettings({ anchor: 'bottom-right', width }), [display]).rect;
+    assert.deepEqual(right, { x: 1536 - width - 16, y: 816 - height - 16, width, height });
+    assert.equal(capsulePose(cleanSettings({ anchor: 'bottom-left', width }), [display]).rect.x, 80);
+  }
+});
+
+test('corner anchors survive drawer expansion and negative or removed displays', () => {
+  const settings = cleanSettings({ anchor: 'bottom-right', width: 533, display: 2 });
+  const { rect, display } = capsulePose(settings, screens);
+  assert.deepEqual(rect, { x: -549, y: 664, width: 533, height: 280 });
+  const expanded = windowRect(rect, display.workArea, true, 500);
+  assert.equal(expanded.y + expanded.height, display.workArea.y + display.workArea.height);
+  assert.deepEqual(windowRect(rect, display.workArea, false, 500), rect);
+  const fallback = capsulePose(settings, [screens[0]]);
+  assert.deepEqual(fallback.rect, { x: 987, y: 520, width: 533, height: 280 });
+  assert.equal(settings.display, 2);
 });
 test('expanded drawer at bottom/right does not mutate the collapsed geometry', () => {
   const settings = cleanSettings({ width: 240, anchor: 'custom', position: { x: 1296, y: 690 } });

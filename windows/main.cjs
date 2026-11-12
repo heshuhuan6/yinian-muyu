@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { cleanSettings, validMessage, localAsset } = require('./validation.cjs');
 const { clampWidth, heightFor, displayForRect, fitRect, capsulePose, windowRect, gestureRect } = require('./geometry.cjs');
+const { LOGIN_ARG, createLoginItem } = require('./login-item.cjs');
 
 const APP_URL = 'muyu://app/index.html';
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'none'; font-src 'self'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -32,7 +33,7 @@ app.on('session-created', ses => {
   ses.on('will-download', event => event.preventDefault());
 });
 
-let win, tray, settings, settingsPath;
+let win, tray, settings, settingsPath, loginItem;
 let ready = false, quitting = false, sleeping = false, locked = false, settingsExtra = 0, settingsOpen = false;
 let gesture = null, saveTimer = null, syncedWidth = null;
 let latest = { count: 0, bpm: 60, sound: false, mode: 'clock', paused: false };
@@ -96,14 +97,20 @@ function cancelGesture() {
 function desktopGesture(data) {
   if (data.action === 'begin') {
     cancelGesture();
-    gesture = { mode: data.mode, origin: pose().rect };
+    gesture = { mode: data.mode, origin: pose().rect, anchor: settings.anchor };
     return;
   }
   if (!gesture || gesture.mode !== data.mode) return;
   if (data.action === 'cancel') { cancelGesture(); return; }
   const target = gestureRect(gesture.origin, data.mode, data.dx, data.dy);
-  const display = displayForRect(target, displays(), settings.display);
-  commitRect(fitRect(target, display.workArea), display);
+  if (data.mode === 'resize' && gesture.anchor !== 'custom') {
+    // Corner placement remains attached when resizing; only a move detaches it.
+    settings.width = target.width;
+    place();
+  } else {
+    const display = displayForRect(target, displays(), settings.display);
+    commitRect(fitRect(target, display.workArea), display);
+  }
   if (data.action === 'end') { gesture = null; persist(); refreshMenu(); }
 }
 function setDesktopWidth(width, immediate = false) {
@@ -115,10 +122,10 @@ function setDesktopWidth(width, immediate = false) {
   if (immediate) persist(); else saveSoon();
   refreshMenu();
 }
-function show() {
+function show(focus = true) {
   place();
-  win.show();
   win.setAlwaysOnTop(settings.pinned, 'screen-saver');
+  if (focus) win.show(); else win.showInactive();
   void syncPaused();
   refreshMenu();
 }
@@ -140,6 +147,8 @@ function setPreference(key, value) {
 }
 function refreshMenu() {
   if (!tray || !win || win.isDestroyed()) return;
+  let startup = { available: false, enabled: false };
+  try { startup = loginItem.read(); } catch (error) { recordError(error); }
   menu = Menu.buildFromTemplate([
     { label: `一念木鱼 · 已敲 ${latest.count} 声`, enabled: false },
     { type: 'separator' },
@@ -151,9 +160,17 @@ function refreshMenu() {
     { type: 'separator' },
     { id: 'left', label: '移到左上角', type: 'checkbox', checked: settings.anchor === 'left', click: () => setPreference('anchor', 'left') },
     { id: 'right', label: '移到右上角', type: 'checkbox', checked: settings.anchor === 'right', click: () => setPreference('anchor', 'right') },
+    { id: 'bottom-left', label: '移到左下角', type: 'checkbox', checked: settings.anchor === 'bottom-left', click: () => setPreference('anchor', 'bottom-left') },
+    { id: 'bottom-right', label: '移到右下角', type: 'checkbox', checked: settings.anchor === 'bottom-right', click: () => setPreference('anchor', 'bottom-right') },
     { label: `显示大小 · ${settings.width} px`, submenu: [240, 320, 480, 640, 800].map(width => ({ id: `size-${width}`, label: `${width} px`, type: 'checkbox', checked: settings.width === width, click: () => setPreference('width', width) })) },
     { label: '显示屏', submenu: screen.getAllDisplays().map((d, i) => ({ label: `${i + 1} · ${d.label || `${d.size.width} × ${d.size.height}`}`, type: 'radio', checked: preferredDisplay().id === d.id, click: () => setPreference('display', d.id) })) },
     { id: 'pinned', label: '保持置顶', type: 'checkbox', checked: settings.pinned, click: () => setPreference('pinned', !settings.pinned) },
+    { id: 'login-startup', label: '开机自动启动', type: 'checkbox', checked: startup.enabled, enabled: startup.available,
+      click: item => {
+        try { loginItem.setEnabled(item.checked); }
+        catch (error) { recordError(error); dialog.showErrorBox('无法设置开机自动启动', String(error.message)); }
+        refreshMenu();
+      } },
     { id: 'visible', label: win.isVisible() ? '隐藏木鱼并暂停' : '显示木鱼', click: () => { if (win.isVisible()) win.hide(); else show(); } },
     { type: 'separator' },
     { id: 'quit', label: '退出一念木鱼', click: () => app.quit() },
@@ -167,6 +184,7 @@ function trusted(event) {
 }
 
 async function start() {
+  loginItem = createLoginItem(app);
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
   fs.mkdirSync(app.getPath('userData'), { recursive: true });
   try { settings = cleanSettings(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))); }
@@ -228,8 +246,9 @@ async function start() {
   screen.on('display-added', () => { place(); refreshMenu(); });
   screen.on('display-removed', () => { place(); refreshMenu(); });
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.ico')));
-  tray.on('click', show);
-  tray.on('double-click', show);
+  tray.on('click', () => show());
+  tray.on('double-click', () => show());
+  tray.on('right-click', refreshMenu);
   refreshMenu();
 
   ipcMain.on('muyu:bootstrap', event => {
@@ -256,14 +275,14 @@ async function start() {
   });
   place();
   await win.loadURL(APP_URL);
-  win.show();
-  win.setAlwaysOnTop(settings.pinned, 'screen-saver');
+  // Both login startup and a normal first launch show a quiet, unfocused capsule.
+  show(false);
   await syncPaused();
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => { if (win) show(); });
+  app.on('second-instance', (_event, argv) => { if (win && !argv.includes(LOGIN_ARG)) show(); });
   app.on('before-quit', () => { quitting = true; if (settingsPath && settings) persist(); });
   app.on('window-all-closed', () => { if (quitting) app.quit(); });
   app.on('will-quit', () => tray?.destroy());

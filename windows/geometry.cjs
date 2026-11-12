@@ -34,7 +34,10 @@ function capsulePose(settings, displays) {
   if (settings.anchor === 'custom' && settings.position) {
     ({ x, y } = settings.position);
     display = displayForRect({ x, y, width: settings.width, height: heightFor(settings.width) }, displays, settings.display);
-  } else if (settings.anchor === 'right') x = display.workArea.x + display.workArea.width - settings.width - 16;
+  } else {
+    if (settings.anchor === 'right' || settings.anchor === 'bottom-right') x = display.workArea.x + display.workArea.width - settings.width - 16;
+    if (settings.anchor === 'bottom-left' || settings.anchor === 'bottom-right') y = display.workArea.y + display.workArea.height - heightFor(settings.width) - 16;
+  }
   return { rect: fitRect({ x, y, width: settings.width }, display.workArea), display };
 }
 function windowRect(capsule, area, settingsOpen, extra) {

@@ -1,5 +1,6 @@
 import AppKit
 import WebKit
+import ServiceManagement
 
 final class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -28,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     var dragScreenID: Int?
     var desktopGesture: (mode: String, origin: NSPoint, width: CGFloat)?
     var diagnostic: DiagnosticRunner?
+    let loginItem = LoginItemController()
     var widgetSize: NSSize {
         let area = preferredScreen().visibleFrame
         return NSSize(width: min(area.width, settingsOpen ? max(480, widgetWidth) : widgetWidth), height: min(area.height - 16, widgetWidth * 84 / 160 + settingsExtra))
@@ -39,8 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             testPath = args[index + 1]
             preferences = UserDefaults(suiteName: Self.identifier + ".tests." + String(ProcessInfo.processInfo.processIdentifier))!
         } else { testPath = nil; preferences = .standard }
-        let savedAnchor = preferences.string(forKey: "anchor") ?? "left"
-        anchor = ["left", "right", "free"].contains(savedAnchor) ? savedAnchor : "left"
+        let savedAnchor = preferences.string(forKey: "anchor") ?? "right"
+        anchor = ["left", "right", "bottom-left", "bottom-right", "free"].contains(savedAnchor) ? savedAnchor : "right"
         let width = preferences.object(forKey: "width") as? Double ?? 480
         widgetWidth = width.isFinite ? CGFloat(max(240, min(800, width))) : 480
         if let x = preferences.object(forKey: "positionX") as? Double, let top = preferences.object(forKey: "positionTop") as? Double, x.isFinite, top.isFinite { customPosition = NSPoint(x: x, y: top) }
@@ -102,8 +104,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         guard panel != nil, !NSScreen.screens.isEmpty else { return }
         let area = preferredScreen().visibleFrame
         let size = widgetSize
+        let right = anchor == "right" || anchor == "bottom-right"
+        let bottom = anchor == "bottom-left" || anchor == "bottom-right"
         let position = anchor == "free" ? customPosition ?? NSPoint(x: area.minX + 16, y: area.maxY - 16)
-            : NSPoint(x: anchor == "right" ? area.maxX - widgetWidth - 16 : area.minX + 16, y: area.maxY - 16)
+            : NSPoint(x: right ? area.maxX - widgetWidth - 16 : area.minX + 16,
+                      y: bottom ? area.minY + 16 + size.height : area.maxY - 16)
         let x = position.x - (size.width - widgetWidth) / 2
         panel.setFrame(NSRect(x: min(max(area.minX, x), area.maxX - size.width), y: min(max(area.minY, position.y - size.height), area.maxY - size.height), width: size.width, height: size.height), display: true)
         updateHitTesting()
@@ -129,8 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
         guard let gesture = desktopGesture, gesture.mode == mode else { return }
         if action == "update" || action == "end" {
-            anchor = "free"
             if mode == "move" {
+                anchor = "free"
                 let candidate = NSPoint(x: gesture.origin.x + dx, y: gesture.origin.y - dy)
                 let center = NSPoint(x: candidate.x + widgetWidth / 2, y: candidate.y - widgetWidth * 42 / 160)
                 let screen = NSScreen.screens.min { a, b in
@@ -142,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                 customPosition = NSPoint(x: min(max(candidate.x, area.minX), area.maxX - widgetWidth), y: min(max(candidate.y, area.minY + widgetWidth * 84 / 160), area.maxY))
                 placePanel()
             } else {
-                customPosition = gesture.origin
+                if anchor == "free" { customPosition = gesture.origin }
                 let ratio = 84.0 / 160.0
                 setWidgetWidth(gesture.width + CGFloat((dx + dy * ratio) / (1 + ratio * ratio)), persist: false)
             }
@@ -246,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         menu.addItem(item("本次次数清零", #selector(resetCount))); menu.addItem(.separator())
         menu.addItem(item("拖动庭院移动 · 滚轮缩放", nil))
         menu.addItem(item("固定在左上角", #selector(moveLeft), state: anchor == "left")); menu.addItem(item("固定在右上角", #selector(moveRight), state: anchor == "right"))
+        menu.addItem(item("固定在左下角", #selector(moveBottomLeft), state: anchor == "bottom-left")); menu.addItem(item("固定在右下角", #selector(moveBottomRight), state: anchor == "bottom-right"))
         let sizes = NSMenu(title: "显示大小")
         for width in [240, 320, 480, 640, 800] { sizes.addItem(item("\(width) px", #selector(resizeWidget(_:)), state: Int(widgetWidth) == width, tag: width)) }
         sizes.addItem(.separator()); sizes.addItem(item("自定义大小…", #selector(editSize)))
@@ -256,6 +262,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
             let displayItem = NSMenuItem(title: "显示屏", action: nil, keyEquivalent: ""); displayItem.submenu = screens; menu.addItem(displayItem)
         }
         menu.addItem(item("保持置顶", #selector(togglePinned), state: isPinned)); menu.addItem(item(hidden ? "显示木鱼" : "隐藏木鱼并暂停", #selector(toggleVisible)))
+        menu.addItem(.separator())
+        let startup = item(loginItem.title, #selector(toggleLaunchAtLogin), state: loginItem.isEnabled)
+        startup.identifier = NSUserInterfaceItemIdentifier("launchAtLogin")
+        if loginItem.needsApproval { startup.state = .mixed }
+        menu.addItem(startup)
+        if loginItem.needsApproval { menu.addItem(item("在系统设置中允许…", #selector(openLoginSettings))) }
         menu.addItem(.separator()); let quit = item("退出一念木鱼", #selector(quit)); quit.keyEquivalent = "q"; menu.addItem(quit)
     }
     @objc func resumeClock() { if ready { evaluate("window.muyu.resumeClock();") } }
@@ -266,8 +278,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     @objc func resetCount() { if ready { evaluate("window.muyu.resetCount();") } }
     @objc func moveLeft() { anchor = "left"; savePlacement(); placePanel() }
     @objc func moveRight() { anchor = "right"; savePlacement(); placePanel() }
+    @objc func moveBottomLeft() { anchor = "bottom-left"; savePlacement(); placePanel() }
+    @objc func moveBottomRight() { anchor = "bottom-right"; savePlacement(); placePanel() }
+    @objc func toggleLaunchAtLogin() {
+        guard testPath == nil else { return }
+        do {
+            try loginItem.setEnabled(!loginItem.isEnabled && !loginItem.needsApproval)
+            if loginItem.needsApproval { explainLoginApproval() }
+        } catch {
+            if loginItem.needsApproval { explainLoginApproval(); return }
+            let alert = NSAlert(); alert.messageText = "自动启动未能设置"
+            alert.informativeText = "请将一念木鱼放在“应用程序”中，再开启自动启动。\n\n系统信息：" + error.localizedDescription
+            alert.addButton(withTitle: "知道了"); alert.runModal()
+        }
+    }
+    func explainLoginApproval() {
+        let alert = NSAlert(); alert.messageText = "允许一念木鱼自动启动"
+        alert.informativeText = "请在系统设置的“登录项与扩展”中允许一念木鱼。允许后，下次登录电脑会自动显示胶囊。"
+        alert.addButton(withTitle: "前往系统设置"); alert.addButton(withTitle: "稍后")
+        if alert.runModal() == .alertFirstButtonReturn { openLoginSettings() }
+    }
+    @objc func openLoginSettings() { SMAppService.openSystemSettingsLoginItems() }
     @objc func resizeWidget(_ sender: NSMenuItem) { setWidgetWidth(CGFloat(sender.tag)) }
-    @objc func selectScreen(_ sender: NSMenuItem) { dragScreenID = sender.tag; preferences.set(sender.tag, forKey: "screen"); if anchor == "free" { anchor = "left" }; savePlacement(); placePanel() }
+    @objc func selectScreen(_ sender: NSMenuItem) { dragScreenID = sender.tag; preferences.set(sender.tag, forKey: "screen"); if anchor == "free" { anchor = "right" }; savePlacement(); placePanel() }
     @objc func togglePinned() { isPinned.toggle(); preferences.set(isPinned, forKey: "pinned"); panel.level = isPinned ? .floating : .normal }
     @objc func toggleVisible() { if hidden { showPanel() } else { hidden = true; panel.orderOut(nil); if ready { evaluate("window.muyu.setPaused(true);") } } }
     func showPanel() { hidden = false; placePanel(); panel.orderFrontRegardless(); if ready { evaluate("window.muyu.setPaused(\(sleeping));") } }

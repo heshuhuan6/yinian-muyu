@@ -13,6 +13,8 @@ final class DiagnosticRunner {
         record("Native WebGL2, real clock and muted launch", app.latestState["backend"] as? String == "webgl2" && app.latestState["mode"] as? String == "clock" && app.latestState["sound"] as? Bool == false, app.latestState)
         record("Readable transparent desktop panel", app.panel.frame.width == 480 && !app.panel.isOpaque && app.panel.level == .floating && app.panel.styleMask.contains(.nonactivatingPanel))
         record("Capsule-only panel has no toolbar space", abs(app.panel.frame.height - 480 * 84 / 160) < 1 && app.settingsExtra == 0 && !app.settingsOpen)
+        record("New installation defaults to the upper-right corner", app.anchor == "right")
+        record("Native menu offers automatic startup", app.makeMenu().items.contains { $0.identifier?.rawValue == "launchAtLogin" })
         app.moveLeft(); let left = app.panel.frame, area = app.preferredScreen().visibleFrame
         record("Left corner", abs(left.minX - area.minX - 16) < 1 && abs(left.maxY - area.maxY + 16) < 1)
         app.moveRight(); let right = app.panel.frame
@@ -142,8 +144,8 @@ final class DiagnosticRunner {
                                                 self.record("Closing settings restores pure capsule and position", !self.app.settingsOpen && self.app.settingsExtra == 0 && self.app.customPosition == stable && abs(self.app.panel.frame.height - 580 * 84 / 160) < 1)
                                                 self.app.setWidgetWidth(900); self.record("Maximum size is bounded", self.app.widgetWidth <= 800)
                                                 self.app.setWidgetWidth(100); self.record("Minimum size is bounded", self.app.widgetWidth == 240)
-                                                self.app.setWidgetWidth(480); self.app.moveLeft(); self.app.resumeClock()
-                                                self.finish()
+                                                self.app.setWidgetWidth(480); self.app.resumeClock()
+                                                self.testBottomPlacement()
                                             }
                                         }
                                     }
@@ -151,6 +153,32 @@ final class DiagnosticRunner {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+    func testBottomPlacement() {
+        app.moveBottomRight()
+        let area = app.preferredScreen().visibleFrame, initial = app.panel.frame
+        record("Lower-right placement avoids Dock and menu bar", abs(initial.maxX - area.maxX + 16) < 1 && abs(initial.minY - area.minY - 16) < 1)
+        app.handleDesktopGesture(["action": "begin", "mode": "resize", "dx": 0.0, "dy": 0.0])
+        app.handleDesktopGesture(["action": "end", "mode": "resize", "dx": 37.0, "dy": 19.425])
+        record("Resize handle preserves the selected corner", app.anchor == "bottom-right" && abs(app.widgetWidth - 517) < 1)
+        let collapsed = app.panel.frame
+        record("Resizing preserves the lower-right anchor", abs(collapsed.maxX - area.maxX + 16) < 1 && abs(collapsed.minY - area.minY - 16) < 1)
+        app.editSchedule()
+        after(0.25) {
+            let expanded = self.app.panel.frame
+            self.record("Lower-right settings expand upward inside work area", self.app.settingsOpen && expanded.height > collapsed.height && abs(expanded.minY - area.minY - 16) < 1 && expanded.maxY <= area.maxY)
+            self.app.evaluate("window.muyu.showSettings(false);") { _, _ in
+                self.after(0.2) {
+                    self.record("Closing lower-right settings restores exact capsule frame", self.app.panel.frame == collapsed && self.app.anchor == "bottom-right")
+                    let restored = AppDelegate()
+                    self.record("Lower-right preference survives a reload", restored.anchor == "bottom-right" && restored.widgetWidth == 517)
+                    self.app.moveBottomLeft()
+                    self.record("Lower-left shortcut stays inside work area", abs(self.app.panel.frame.minX - area.minX - 16) < 1 && abs(self.app.panel.frame.minY - area.minY - 16) < 1)
+                    self.app.moveRight(); self.app.setWidgetWidth(480)
+                    self.finish()
                 }
             }
         }

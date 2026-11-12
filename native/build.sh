@@ -12,7 +12,7 @@ cp native/Info.plist "$stage/Contents/Info.plist"
 node native/embed.mjs "$stage/Contents/Resources"
 cp LICENSE THIRD_PARTY_NOTICES.md "$stage/Contents/Resources/"
 for architecture in arm64 x86_64; do
-  xcrun swiftc -parse-as-library -swift-version 5 -O -target "$architecture-apple-macosx13.0" -framework AppKit -framework WebKit native/main.swift native/AppDelegate.swift native/Diagnostic.swift -o "$scratch/Muyu-$architecture"
+  xcrun swiftc -parse-as-library -swift-version 5 -O -target "$architecture-apple-macosx13.0" -framework AppKit -framework WebKit -framework ServiceManagement native/main.swift native/AppDelegate.swift native/LoginItem.swift native/Diagnostic.swift -o "$scratch/Muyu-$architecture"
 done
 xcrun lipo -create "$scratch/Muyu-arm64" "$scratch/Muyu-x86_64" -output "$stage/Contents/MacOS/Muyu"
 xcrun swiftc -parse-as-library -O -framework AppKit native/Icon.swift -o "$scratch/icon-builder"

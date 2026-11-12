@@ -8,9 +8,9 @@ import { getCurrentFuseWire, FuseV1Options } from '@electron/fuses';
 
 const dir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const executablePath = path.join(dir, 'build', 'YinianMuyu-win32-x64', 'YinianMuyu.exe');
-const output = path.join(dir, 'test-results', 'v1.1');
+const output = path.join(dir, 'test-results', 'v1.2');
 await fs.mkdir(output, { recursive: true });
-const report = { version: '1.1.0', checks: [], executablePath, started: new Date().toISOString() };
+const report = { version: '1.2.0', checks: [], executablePath, started: new Date().toISOString() };
 let application = await electron.launch({ executablePath, timeout: 30000 });
 let settingsPath, originalSettings;
 try {
@@ -25,14 +25,14 @@ try {
   });
   settingsPath = path.join(info.userData, 'settings.json');
   try { originalSettings = await fs.readFile(settingsPath, 'utf8'); } catch { originalSettings = '{}'; }
-  assert.equal(info.appVersion, '1.1.0');
+  assert.equal(info.appVersion, '1.2.0');
   assert.equal(info.packaged, true); assert.equal(info.preferences.sandbox, true); assert.equal(info.preferences.contextIsolation, true); assert.equal(info.preferences.nodeIntegration, false);
   assert.equal(await application.evaluate(({ BrowserWindow }) => { const wc = BrowserWindow.getAllWindows()[0].webContents; wc.openDevTools(); return wc.isDevToolsOpened(); }), false);
   const initial = await page.evaluate(() => window.muyu.inspect());
   assert.equal(initial.sound, false); assert.equal(initial.bpm, 60); assert.equal(initial.mode, 'clock');
   assert.equal(initial.settingsOpen, false); assert.equal(await page.locator('.settings-panel').isVisible(), false);
   assert.ok(Math.abs(info.bounds.height - Math.ceil(initial.desktopWidth * .525)) <= 1);
-  report.checks.push({ name: 'v1.1 packaged EXE starts capsule-only with bundled Chromium and sandbox', passed: true, info, initial });
+  report.checks.push({ name: 'v1.2 packaged EXE starts capsule-only with bundled Chromium and sandbox', passed: true, info, initial });
   const secondExit = await new Promise((resolve, reject) => {
     const p = spawn(executablePath, [], { windowsHide: true, stdio: 'ignore' });
     const timeout = setTimeout(() => { p.kill(); reject(new Error('Second instance failed to exit')); }, 15000);

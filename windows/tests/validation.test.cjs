@@ -5,7 +5,7 @@ const { cleanSettings, validMessage, validPeriods, localAsset } = require('../va
 test('untrusted persisted preferences normalize to safe defaults', () => {
   const defaults = cleanSettings(null);
   assert.equal(defaults.bpm, 60);
-  assert.equal(defaults.anchor, 'left');
+  assert.equal(defaults.anchor, 'right');
   assert.equal(defaults.pinned, true);
   assert.deepEqual(defaults.periods.map(p => [p.start, p.end]), [[480, 720], [870, 1050]]);
   assert.deepEqual(cleanSettings({ bpm: Infinity, width: 40000, periods: 'bad', anchor: '__proto__' }), defaults);
@@ -26,7 +26,13 @@ test('v1 preferences migrate and arbitrary v1.1 geometry survives serialization'
   assert.equal(value.width, 377); assert.equal(value.anchor, 'custom');
   assert.deepEqual(value.position, { x: -720, y: 215 });
   assert.deepEqual(cleanSettings(JSON.parse(JSON.stringify(value))), value);
-  assert.equal(cleanSettings({ anchor: 'custom', position: { x: Infinity, y: 0 } }).anchor, 'left');
+  assert.equal(cleanSettings({ anchor: 'custom', position: { x: Infinity, y: 0 } }).anchor, 'right');
+});
+
+test('new users default upper-right while all old anchors and custom positions survive', () => {
+  for (const anchor of ['left', 'right', 'bottom-left', 'bottom-right']) assert.equal(cleanSettings({ anchor }).anchor, anchor);
+  assert.deepEqual(cleanSettings({ anchor: 'custom', position: { x: 123, y: 456 }, width: 533 }).position, { x: 123, y: 456 });
+  assert.equal(cleanSettings({ startup: true }).startup, undefined);
 });
 test('desktop messages enforce finite bounded offsets and a zero-offset begin', () => {
   for (const mode of ['move', 'resize']) {
